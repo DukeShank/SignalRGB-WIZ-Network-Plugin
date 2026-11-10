@@ -21,10 +21,10 @@ The existing plugin did not work with my WiZ Neo. This repository contains the f
 | Bulb | Philips WiZ Neo RGB bulb |
 | Module name | `ESP25_SHRGB_01` |
 | Bulb firmware | 1.38.0 |
-| SignalRGB | 2.5.84 |
+| SignalRGB | 2.5.86 |
 | Operating system | Windows 11 |
 | Network | 2.4 GHz Wi-Fi, same network as the PC |
-| Plugin version | 1.2.3 (1.3.0 changes: see [Status](#status)) |
+| Plugin version | 1.3.0 |
 
 Other WiZ models, firmware versions, SignalRGB versions and network setups may behave differently.
 
@@ -79,15 +79,19 @@ All settings are per device, in the bulb's device settings in SignalRGB.
 
 ## Status
 
-**Verified with 1.2.3** on the tested configuration above: discovery, device creation, RGB colour, dimming and continuous updates.
+**Verified with 1.3.0** on the tested configuration above:
+- Discovery, device creation, RGB colour, dimming and continuous updates.
+- Service panel: device details and the status line (**Online**).
+- Discovery start is logged once instead of on every scan.
+- Minimal Brightness shows as a number slider and keeps its saved value.
+- On Exit or Sleep: **Leave as is**, **Turn off** and **Shutdown Color** on exit, and **Shutdown Color** on sleep (bulb off). After being turned off, the bulb comes back on when SignalRGB starts again.
+- The `DeviceType(): property isn't callable` message logged with 1.2.3 no longer appears.
 
-**Changes in 1.3.0, not yet verified on hardware:**
-- Corrected colour pickers (full hue range) and the Minimal Brightness control.
-- `DeviceType()` export.
-- Control socket retry.
-- On Exit or Sleep and Shutdown Color settings.
-- RGB-only device filter and the status line in the service panel.
-- 1024×1024 transparent logo.
+**Not yet verified on hardware:**
+- Selecting purple and pink hues in Forced Color.
+- The **Not responding to discovery** status after the bulb loses power.
+- Control socket retry (tested only in a simulated run).
+- The new logo, which SignalRGB loads from the `main` branch.
 
 **Known limitations**
 - Only RGB colour and dimming are sent. White temperature, scenes and groups are not supported.
@@ -95,7 +99,6 @@ All settings are per device, in the bulb's device settings in SignalRGB.
 - A device that stops answering discovery is shown as not responding, but it is not removed automatically.
 - Multiple bulbs, and device removal or reconnection, have not been tested.
 - Shutdown commands are single UDP packets without confirmation; if a packet is lost, the bulb keeps its last colour.
-- SignalRGB 2.5.84 logged `DeviceType(): property isn't callable` with version 1.2.3. Version 1.3.0 adds `DeviceType()`; whether this removes the message has not been checked yet.
 
 ## Troubleshooting
 

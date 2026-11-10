@@ -28,7 +28,7 @@
  *   adapters; there is no manual IP entry
  *
  * STATUS
- * Tested on Windows 11 with SignalRGB 2.5.84 and one WiZ Neo bulb.
+ * Tested on Windows 11 with SignalRGB 2.5.86 and one WiZ Neo bulb.
  *
  * CREDITS
  * - Plugin structure from the SignalRGB Govee plugin:
