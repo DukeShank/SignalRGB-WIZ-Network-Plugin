@@ -53,17 +53,19 @@ export function ControllableParameters() {
             group: "lighting",
             label: "Forced Color",
             min: "0",
-            max: "255",
+            max: "360",
             type: "color",
             default: "#009bde"
         },
         {
+            // Property key kept as "minBrightniss" so saved values are kept.
             property: "minBrightniss",
             group: "lighting",
-            label: "Minimal Brightniss",
+            label: "Minimal Brightness",
+            step: "1",
             min: "10",
             max: "100",
-            type: "hue",
+            type: "number",
             default: "10"
         },
         {
@@ -71,7 +73,7 @@ export function ControllableParameters() {
             group: "lighting",
             label: "Default Color when dimmed",
             min: "0",
-            max: "255",
+            max: "360",
             type: "color",
             default: "#010101"
         },
