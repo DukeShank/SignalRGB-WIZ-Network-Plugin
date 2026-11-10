@@ -1387,6 +1387,7 @@ class WIZDevice {
 
         if (this.stale) {
             this.stale = false;
+            service.updateController(this);
             service.log(
                 "[WIZ] Device is responding to discovery again."
             );
@@ -1495,6 +1496,7 @@ class WIZDevice {
             Date.now() - this.lastSeen > WIZ_STALE_AFTER_MS
         ) {
             this.stale = true;
+            service.updateController(this);
             service.log(
                 "[WIZ] Device has not answered discovery recently."
             );
