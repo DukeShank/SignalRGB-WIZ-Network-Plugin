@@ -163,6 +163,8 @@ const WIZ_COMMAND_SPEED = 100;
 const WIZ_MIN_DIMMING = 10;
 // Consecutive failed writes before the control socket is re-created.
 const WIZ_MAX_SEND_FAILURES = 20;
+// Minimum time between attempts to re-open a missing control socket.
+const WIZ_SOCKET_RETRY_MS = 2000;
 
 // Fixed request payloads, built once instead of on every scan.
 // The registration fields are protocol placeholders, not host/device
@@ -202,6 +204,8 @@ let wizSendFailures = 0;
 let wizControlAckLogged = false;
 let wizControlErrorLogged = false;
 let wizRenderStartLogged = false;
+let wizLastSocketAttempt = 0;
+let wizOpenErrorLogged = false;
 
 // Parsed colour arrays for the Forced Color and dimmed-colour settings,
 // keyed by the setting's string value. Re-parsed only when it changes.
@@ -519,12 +523,18 @@ function wizOpenControlSocket(mac) {
             "[WIZ] Bound device control socket to local port " + boundPort
         );
 
+        wizOpenErrorLogged = false;
+
         return true;
 
     } catch (err) {
-        device.log(
-            "[WIZ] Control socket initialization failed: " + String(err)
-        );
+        // Log only the first failure; Render() retries every 2 s.
+        if (!wizOpenErrorLogged) {
+            device.log(
+                "[WIZ] Control socket initialization failed: " + String(err)
+            );
+            wizOpenErrorLogged = true;
+        }
 
         wizCloseControlSocket();
 
@@ -688,15 +698,30 @@ export function Render() {
         return;
     }
 
+    // Re-open a missing control socket, at most every 2 s, instead of
+    // stopping after a failed Initialize() (same approach as
+    // connectSerial() in the Adalight plugin).
     if (!wizControlSocket) {
-        if (!wizControlErrorLogged) {
-            device.log(
-                "[WIZ] Streaming enabled, but the control socket is unavailable."
-            );
-            wizControlErrorLogged = true;
+        const now = Date.now();
+
+        if (now - wizLastSocketAttempt < WIZ_SOCKET_RETRY_MS) {
+            return;
         }
 
-        return;
+        wizLastSocketAttempt = now;
+
+        const mac = String(
+            controller.mac || controller.id || ""
+        ).toLowerCase();
+
+        if (
+            !wizIsValidMacAddress(mac) ||
+            !wizIsUsableDeviceAddress(controller.ip) ||
+            Number(controller.port) !== WIZ_DEVICE_PORT ||
+            !wizOpenControlSocket(mac)
+        ) {
+            return;
+        }
     }
 
     if (!wizRenderStartLogged) {
@@ -753,6 +778,8 @@ export function Shutdown(suspend) {
     wizControlAckLogged = false;
     wizControlErrorLogged = false;
     wizRenderStartLogged = false;
+    wizLastSocketAttempt = 0;
+    wizOpenErrorLogged = false;
 }
 
 
