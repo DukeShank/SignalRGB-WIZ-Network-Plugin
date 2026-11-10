@@ -5,6 +5,7 @@ export function Version() { return "1.2.3"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
+export function DeviceType() { return "lightingcontroller"; }
 export function Publisher() { return "GreenSky Productions"; }
 export function Size() { return [1, 1]; }
 export function DefaultPosition() { return [75, 70]; }
