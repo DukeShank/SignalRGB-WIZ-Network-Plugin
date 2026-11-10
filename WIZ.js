@@ -1,12 +1,53 @@
+/*
+ * WiZ Network Plugin for SignalRGB
+ *
+ * Original plugin: GreenSky Productions (Philipp-Martin Seelk)
+ * https://github.com/GreenSky-Productions/SignalRGB-WIZ-Network-Plugin
+ * WiZ Neo support and network handling: DukeShank
+ * https://github.com/DukeShank/SignalRGB-WIZ-Network-Plugin
+ *
+ * PURPOSE
+ * Discovers WiZ lights on the local network and sends SignalRGB
+ * colour and brightness to each one over UDP.
+ *
+ * TARGET HARDWARE
+ * - Tested: Philips WiZ Neo RGB bulb (ESP25_SHRGB_01), firmware 1.38.0
+ * - Only devices whose module name contains "RGB" are added
+ *
+ * PROTOCOL
+ * - WiZ local UDP API on device port 38899
+ * - Discovery: "registration" broadcast, then "getSystemConfig"
+ * - Control: "setPilot" (r, g, b, dimming); "setState" to turn off
+ *
+ * INSTALLATION
+ * Add this repository as an add-on in SignalRGB (branch: main).
+ *
+ * LIMITATIONS
+ * - RGB colour and dimming only: no white temperature, scenes or groups
+ * - Discovery may fail with client isolation, VLANs or several network
+ *   adapters; there is no manual IP entry
+ *
+ * STATUS
+ * Tested on Windows 11 with SignalRGB 2.5.84 and one WiZ Neo bulb.
+ *
+ * CREDITS
+ * - Plugin structure from the SignalRGB Govee plugin:
+ *   https://gitlab.com/signalrgb/Govee/-/blob/main/Govee.js
+ * - WiZ protocol details from the openHAB WiZ binding:
+ *   https://github.com/SRGDamia1/openhab2-addons/blob/025b9739935b6ea87ecba6cf02c417d0434873e1/bundles/org.openhab.binding.wizlighting/src/main/java/org/openhab/binding/wizlighting/internal/enums/WizLightingMethodType.java
+ *
+ * LICENCE
+ * The original plugin has no licence file. See README.md.
+ */
 import udp from "@SignalRGB/udp";
 
 export function Name() { return "WIZ Interface"; }
-export function Version() { return "1.2.3"; }
+export function Version() { return "1.3.0"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
 export function DeviceType() { return "lightingcontroller"; }
-export function Publisher() { return "GreenSky Productions"; }
+export function Publisher() { return "GreenSky Productions, DukeShank"; }
 export function Size() { return [1, 1]; }
 export function DefaultPosition() { return [75, 70]; }
 export function DefaultScale() { return 10.0; }
@@ -28,7 +69,7 @@ export function ImageUrl() {
 controller:readonly, service:readonly, device:readonly,
 AutoStartStream:readonly, MaxUpdatesPerSecond:readonly, forcedColor:readonly, forceColor:readonly,
 dimmColor:readonly, minBrightniss:readonly,
-shutdownMode:readonly, shutdownColor:readonly, variableLedCount:readonly
+shutdownMode:readonly, shutdownColor:readonly
 */
 
 export function ControllableParameters() {
@@ -112,8 +153,6 @@ export function DefaultComponentBrand() {
 export function SubdeviceController() {
     return false;
 }
-
-export function onvariableLedCountChanged() {}
 
 // Called by SignalRGB when the Max Updates Per Second setting changes.
 // The log line shows that the value arrived and what interval it produces.
@@ -653,21 +692,6 @@ export function Initialize() {
         `${componentName} Room: ${controller.roomId}`
     );
 
-    device.addProperty({
-        property: "variableLedCount",
-        label: "Leds",
-        type: "number",
-        min: 1,
-        max: 1,
-        default: 1
-    });
-
-    // isTW is stored on the controller object, not on the device object.
-    if (controller.isTW) {
-        device.removeProperty("forcedColor");
-        device.removeProperty("forceColor");
-    }
-
     device.setSize(1, 1);
     device.setControllableLeds(
         ["LED 1"],
@@ -849,39 +873,11 @@ export function Shutdown(SystemSuspending) {
 // DEVICE LIBRARY
 // ============================================================
 
+// Display names for known module names (the moduleName field of the
+// getSystemConfig reply). Other RGB modules are named "WIZ <moduleName>".
 const WIZDeviceLibrary = {
-    "ESP03_SHRGB3_01ABI": {
-        productName: "WRGB LED Strip",
-        imageUrl: "https://www.assets.signify.com/is/image/Signify/WiFi-BLE-LEDstrip-2M-1600lm-startkit-SPP?&wid=200&hei=200&qlt=100",
-        sku: 27082,
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportWhiteColor: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    },
-
-    127372: {
-        productName: "W100 WRGB Light Bulb",
-        imageUrl: "https://www.assets.signify.com/is/image/PhilipsLighting/Wi_Fi_BLE_100W_A67_E27_922_65_RGB_1PF_6_S-SPP?wid=200&hei=200&qlt=100",
-        sku: 127372,
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportWhiteColor: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    },
-
-    "ESP25_SHRGB_01": {
-        productName: "WiZ Neo RGB Bulb",
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    }
+    "ESP03_SHRGB3_01ABI": { productName: "WRGB LED Strip" },
+    "ESP25_SHRGB_01": { productName: "WiZ Neo RGB Bulb" }
 };
 
 
@@ -1196,9 +1192,12 @@ export function DiscoveryService() {
                 WIZ_DEVICE_PORT
             );
 
-            service.log(
-                "[WIZ] WiZ discovery registration broadcast submitted."
-            );
+            // Log the first scan only; later scans repeat every 5-60 s.
+            if (wizScanCount === 1) {
+                service.log(
+                    "[WIZ] Discovery started: registration broadcast sent."
+                );
+            }
 
         } catch (err) {
             service.log(
