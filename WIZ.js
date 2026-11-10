@@ -28,7 +28,7 @@ export function ImageUrl() {
 controller:readonly, service:readonly, device:readonly,
 AutoStartStream:readonly, MaxUpdatesPerSecond:readonly, forcedColor:readonly, forceColor:readonly,
 dimmColor:readonly, minBrightniss:readonly,
-TurnOffOnShutdown:readonly, variableLedCount:readonly
+shutdownMode:readonly, shutdownColor:readonly, variableLedCount:readonly
 */
 
 export function ControllableParameters() {
@@ -77,6 +77,23 @@ export function ControllableParameters() {
             max: "360",
             type: "color",
             default: "#010101"
+        },
+        {
+            property: "shutdownMode",
+            group: "lighting",
+            label: "On Exit or Sleep",
+            type: "combobox",
+            values: ["Leave as is", "Turn off", "Shutdown Color"],
+            default: "Leave as is"
+        },
+        {
+            property: "shutdownColor",
+            group: "lighting",
+            label: "Shutdown Color",
+            min: "0",
+            max: "360",
+            type: "color",
+            default: "#ffb46b"
         },
         {
             property: "forceColor",
@@ -761,7 +778,52 @@ export function Render() {
 // DEVICE SHUTDOWN
 // ============================================================
 
-export function Shutdown(suspend) {
+// Sends one JSON command (for example setState) on the control socket.
+function wizSendCommand(payload) {
+    if (
+        !wizControlSocket ||
+        !wizIsUsableDeviceAddress(controller.ip) ||
+        Number(controller.port) !== WIZ_DEVICE_PORT
+    ) {
+        return false;
+    }
+
+    try {
+        wizControlSocket.write(
+            JSON.stringify(payload),
+            controller.ip,
+            WIZ_DEVICE_PORT
+        );
+        return true;
+    } catch (err) {
+        device.log("[WIZ] Command failed: " + String(err));
+        return false;
+    }
+}
+
+// SystemSuspending is true when the PC goes to sleep, false otherwise
+// (for example when SignalRGB exits).
+// "Leave as is" keeps the previous behaviour: nothing is sent.
+export function Shutdown(SystemSuspending) {
+    const mode = typeof shutdownMode === "undefined"
+        ? "Leave as is"
+        : shutdownMode;
+
+    if (mode === "Turn off" || (mode === "Shutdown Color" && SystemSuspending)) {
+        if (wizSendCommand({ method: "setState", params: { state: false } })) {
+            device.log("[WIZ] Shutdown: sent the off command.");
+        }
+    } else if (mode === "Shutdown Color") {
+        const frame = wizMakeFrame(
+            device.createColorArray(shutdownColor, 1, "Inline"),
+            100
+        );
+
+        if (frame && wizSendFrame(frame)) {
+            device.log("[WIZ] Shutdown: sent the shutdown colour.");
+        }
+    }
+
     wizResetColorCache();
 
     if (wizControlSocket) {
