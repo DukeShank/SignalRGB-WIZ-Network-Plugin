@@ -1347,6 +1347,7 @@ class WIZDevice {
         this.initialized = true;
         this.deviceInfoLoaded = false;
         this.announced = false;
+        this.unsupportedLogged = false;
 
         this.lastSeen = Date.now();
         this.stale = false;
@@ -1442,8 +1443,11 @@ class WIZDevice {
             : -1;
 
         this.modelName = data.moduleName;
-        this.isRGB = data.moduleName.toUpperCase().includes("RGB");
-        this.isTW = data.moduleName.toUpperCase().includes("TW");
+        // Same order as pywizlight: a module name containing "RGB" is a
+        // colour device; "TW" alone means tunable white only.
+        const moduleName = data.moduleName.toUpperCase();
+        this.isRGB = moduleName.includes("RGB");
+        this.isTW = !this.isRGB && moduleName.includes("TW");
         this.deviceInfoLoaded = true;
 
         if (
@@ -1462,6 +1466,20 @@ class WIZDevice {
     }
 
     update() {
+        // This plugin only sends RGB colour, so plugs and white-only bulbs
+        // are listed in the service panel but not added as devices.
+        if (this.deviceInfoLoaded && !this.isRGB) {
+            if (!this.unsupportedLogged) {
+                service.log(
+                    "[WIZ] Not added: " + this.modelName +
+                    " is not an RGB device."
+                );
+                this.unsupportedLogged = true;
+            }
+
+            return;
+        }
+
         if (this.deviceInfoLoaded && !this.announced) {
             service.updateController(this);
             service.announceController(this);
