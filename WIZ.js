@@ -1,11 +1,53 @@
+/*
+ * WiZ Network Plugin for SignalRGB
+ *
+ * Original plugin: GreenSky Productions (Philipp-Martin Seelk)
+ * https://github.com/GreenSky-Productions/SignalRGB-WIZ-Network-Plugin
+ * WiZ Neo support and network handling: DukeShank
+ * https://github.com/DukeShank/SignalRGB-WIZ-Network-Plugin
+ *
+ * PURPOSE
+ * Discovers WiZ lights on the local network and sends SignalRGB
+ * colour and brightness to each one over UDP.
+ *
+ * TARGET HARDWARE
+ * - Tested: Philips WiZ Neo RGB bulb (ESP25_SHRGB_01), firmware 1.38.0
+ * - Only devices whose module name contains "RGB" are added
+ *
+ * PROTOCOL
+ * - WiZ local UDP API on device port 38899
+ * - Discovery: "registration" broadcast, then "getSystemConfig"
+ * - Control: "setPilot" (r, g, b, dimming); "setState" to turn off
+ *
+ * INSTALLATION
+ * Add this repository as an add-on in SignalRGB (branch: main).
+ *
+ * LIMITATIONS
+ * - RGB colour and dimming only: no white temperature, scenes or groups
+ * - Discovery may fail with client isolation, VLANs or several network
+ *   adapters; there is no manual IP entry
+ *
+ * STATUS
+ * Tested on Windows 11 with SignalRGB 2.5.86 and one WiZ Neo bulb.
+ *
+ * CREDITS
+ * - Plugin structure from the SignalRGB Govee plugin:
+ *   https://gitlab.com/signalrgb/Govee/-/blob/main/Govee.js
+ * - WiZ protocol details from the openHAB WiZ binding:
+ *   https://github.com/SRGDamia1/openhab2-addons/blob/025b9739935b6ea87ecba6cf02c417d0434873e1/bundles/org.openhab.binding.wizlighting/src/main/java/org/openhab/binding/wizlighting/internal/enums/WizLightingMethodType.java
+ *
+ * LICENCE
+ * The original plugin has no licence file. See README.md.
+ */
 import udp from "@SignalRGB/udp";
 
 export function Name() { return "WIZ Interface"; }
-export function Version() { return "1.2.3"; }
+export function Version() { return "1.3.0"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
-export function Publisher() { return "GreenSky Productions"; }
+export function DeviceType() { return "lightingcontroller"; }
+export function Publisher() { return "GreenSky Productions, DukeShank"; }
 export function Size() { return [1, 1]; }
 export function DefaultPosition() { return [75, 70]; }
 export function DefaultScale() { return 10.0; }
@@ -27,7 +69,7 @@ export function ImageUrl() {
 controller:readonly, service:readonly, device:readonly,
 AutoStartStream:readonly, MaxUpdatesPerSecond:readonly, forcedColor:readonly, forceColor:readonly,
 dimmColor:readonly, minBrightniss:readonly,
-TurnOffOnShutdown:readonly, variableLedCount:readonly
+shutdownMode:readonly, shutdownColor:readonly
 */
 
 export function ControllableParameters() {
@@ -53,17 +95,19 @@ export function ControllableParameters() {
             group: "lighting",
             label: "Forced Color",
             min: "0",
-            max: "255",
+            max: "360",
             type: "color",
             default: "#009bde"
         },
         {
+            // Property key kept as "minBrightniss" so saved values are kept.
             property: "minBrightniss",
             group: "lighting",
-            label: "Minimal Brightniss",
+            label: "Minimal Brightness",
+            step: "1",
             min: "10",
             max: "100",
-            type: "hue",
+            type: "number",
             default: "10"
         },
         {
@@ -71,9 +115,26 @@ export function ControllableParameters() {
             group: "lighting",
             label: "Default Color when dimmed",
             min: "0",
-            max: "255",
+            max: "360",
             type: "color",
             default: "#010101"
+        },
+        {
+            property: "shutdownMode",
+            group: "lighting",
+            label: "On Exit or Sleep",
+            type: "combobox",
+            values: ["Leave as is", "Turn off", "Shutdown Color"],
+            default: "Leave as is"
+        },
+        {
+            property: "shutdownColor",
+            group: "lighting",
+            label: "Shutdown Color",
+            min: "0",
+            max: "360",
+            type: "color",
+            default: "#ffb46b"
         },
         {
             property: "forceColor",
@@ -92,8 +153,6 @@ export function DefaultComponentBrand() {
 export function SubdeviceController() {
     return false;
 }
-
-export function onvariableLedCountChanged() {}
 
 // Called by SignalRGB when the Max Updates Per Second setting changes.
 // The log line shows that the value arrived and what interval it produces.
@@ -160,6 +219,8 @@ const WIZ_COMMAND_SPEED = 100;
 const WIZ_MIN_DIMMING = 10;
 // Consecutive failed writes before the control socket is re-created.
 const WIZ_MAX_SEND_FAILURES = 20;
+// Minimum time between attempts to re-open a missing control socket.
+const WIZ_SOCKET_RETRY_MS = 2000;
 
 // Fixed request payloads, built once instead of on every scan.
 // The registration fields are protocol placeholders, not host/device
@@ -199,6 +260,8 @@ let wizSendFailures = 0;
 let wizControlAckLogged = false;
 let wizControlErrorLogged = false;
 let wizRenderStartLogged = false;
+let wizLastSocketAttempt = 0;
+let wizOpenErrorLogged = false;
 
 // Parsed colour arrays for the Forced Color and dimmed-colour settings,
 // keyed by the setting's string value. Re-parsed only when it changes.
@@ -516,12 +579,18 @@ function wizOpenControlSocket(mac) {
             "[WIZ] Bound device control socket to local port " + boundPort
         );
 
+        wizOpenErrorLogged = false;
+
         return true;
 
     } catch (err) {
-        device.log(
-            "[WIZ] Control socket initialization failed: " + String(err)
-        );
+        // Log only the first failure; Render() retries every 2 s.
+        if (!wizOpenErrorLogged) {
+            device.log(
+                "[WIZ] Control socket initialization failed: " + String(err)
+            );
+            wizOpenErrorLogged = true;
+        }
 
         wizCloseControlSocket();
 
@@ -623,21 +692,6 @@ export function Initialize() {
         `${componentName} Room: ${controller.roomId}`
     );
 
-    device.addProperty({
-        property: "variableLedCount",
-        label: "Leds",
-        type: "number",
-        min: 1,
-        max: 1,
-        default: 1
-    });
-
-    // isTW is stored on the controller object, not on the device object.
-    if (controller.isTW) {
-        device.removeProperty("forcedColor");
-        device.removeProperty("forceColor");
-    }
-
     device.setSize(1, 1);
     device.setControllableLeds(
         ["LED 1"],
@@ -685,15 +739,30 @@ export function Render() {
         return;
     }
 
+    // Re-open a missing control socket, at most every 2 s, instead of
+    // stopping after a failed Initialize() (same approach as
+    // connectSerial() in the Adalight plugin).
     if (!wizControlSocket) {
-        if (!wizControlErrorLogged) {
-            device.log(
-                "[WIZ] Streaming enabled, but the control socket is unavailable."
-            );
-            wizControlErrorLogged = true;
+        const now = Date.now();
+
+        if (now - wizLastSocketAttempt < WIZ_SOCKET_RETRY_MS) {
+            return;
         }
 
-        return;
+        wizLastSocketAttempt = now;
+
+        const mac = String(
+            controller.mac || controller.id || ""
+        ).toLowerCase();
+
+        if (
+            !wizIsValidMacAddress(mac) ||
+            !wizIsUsableDeviceAddress(controller.ip) ||
+            Number(controller.port) !== WIZ_DEVICE_PORT ||
+            !wizOpenControlSocket(mac)
+        ) {
+            return;
+        }
     }
 
     if (!wizRenderStartLogged) {
@@ -733,7 +802,52 @@ export function Render() {
 // DEVICE SHUTDOWN
 // ============================================================
 
-export function Shutdown(suspend) {
+// Sends one JSON command (for example setState) on the control socket.
+function wizSendCommand(payload) {
+    if (
+        !wizControlSocket ||
+        !wizIsUsableDeviceAddress(controller.ip) ||
+        Number(controller.port) !== WIZ_DEVICE_PORT
+    ) {
+        return false;
+    }
+
+    try {
+        wizControlSocket.write(
+            JSON.stringify(payload),
+            controller.ip,
+            WIZ_DEVICE_PORT
+        );
+        return true;
+    } catch (err) {
+        device.log("[WIZ] Command failed: " + String(err));
+        return false;
+    }
+}
+
+// SystemSuspending is true when the PC goes to sleep, false otherwise
+// (for example when SignalRGB exits).
+// "Leave as is" keeps the previous behaviour: nothing is sent.
+export function Shutdown(SystemSuspending) {
+    const mode = typeof shutdownMode === "undefined"
+        ? "Leave as is"
+        : shutdownMode;
+
+    if (mode === "Turn off" || (mode === "Shutdown Color" && SystemSuspending)) {
+        if (wizSendCommand({ method: "setState", params: { state: false } })) {
+            device.log("[WIZ] Shutdown: sent the off command.");
+        }
+    } else if (mode === "Shutdown Color") {
+        const frame = wizMakeFrame(
+            device.createColorArray(shutdownColor, 1, "Inline"),
+            100
+        );
+
+        if (frame && wizSendFrame(frame)) {
+            device.log("[WIZ] Shutdown: sent the shutdown colour.");
+        }
+    }
+
     wizResetColorCache();
 
     if (wizControlSocket) {
@@ -750,6 +864,8 @@ export function Shutdown(suspend) {
     wizControlAckLogged = false;
     wizControlErrorLogged = false;
     wizRenderStartLogged = false;
+    wizLastSocketAttempt = 0;
+    wizOpenErrorLogged = false;
 }
 
 
@@ -757,39 +873,11 @@ export function Shutdown(suspend) {
 // DEVICE LIBRARY
 // ============================================================
 
+// Display names for known module names (the moduleName field of the
+// getSystemConfig reply). Other RGB modules are named "WIZ <moduleName>".
 const WIZDeviceLibrary = {
-    "ESP03_SHRGB3_01ABI": {
-        productName: "WRGB LED Strip",
-        imageUrl: "https://www.assets.signify.com/is/image/Signify/WiFi-BLE-LEDstrip-2M-1600lm-startkit-SPP?&wid=200&hei=200&qlt=100",
-        sku: 27082,
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportWhiteColor: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    },
-
-    127372: {
-        productName: "W100 WRGB Light Bulb",
-        imageUrl: "https://www.assets.signify.com/is/image/PhilipsLighting/Wi_Fi_BLE_100W_A67_E27_922_65_RGB_1PF_6_S-SPP?wid=200&hei=200&qlt=100",
-        sku: 127372,
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportWhiteColor: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    },
-
-    "ESP25_SHRGB_01": {
-        productName: "WiZ Neo RGB Bulb",
-        state: 1,
-        supportRGB: true,
-        supportDimming: true,
-        supportCostumLedCount: false,
-        ledCount: 1
-    }
+    "ESP03_SHRGB3_01ABI": { productName: "WRGB LED Strip" },
+    "ESP25_SHRGB_01": { productName: "WiZ Neo RGB Bulb" }
 };
 
 
@@ -1104,9 +1192,12 @@ export function DiscoveryService() {
                 WIZ_DEVICE_PORT
             );
 
-            service.log(
-                "[WIZ] WiZ discovery registration broadcast submitted."
-            );
+            // Log the first scan only; later scans repeat every 5-60 s.
+            if (wizScanCount === 1) {
+                service.log(
+                    "[WIZ] Discovery started: registration broadcast sent."
+                );
+            }
 
         } catch (err) {
             service.log(
@@ -1255,6 +1346,7 @@ class WIZDevice {
         this.initialized = true;
         this.deviceInfoLoaded = false;
         this.announced = false;
+        this.unsupportedLogged = false;
 
         this.lastSeen = Date.now();
         this.stale = false;
@@ -1294,6 +1386,7 @@ class WIZDevice {
 
         if (this.stale) {
             this.stale = false;
+            service.updateController(this);
             service.log(
                 "[WIZ] Device is responding to discovery again."
             );
@@ -1350,8 +1443,11 @@ class WIZDevice {
             : -1;
 
         this.modelName = data.moduleName;
-        this.isRGB = data.moduleName.toUpperCase().includes("RGB");
-        this.isTW = data.moduleName.toUpperCase().includes("TW");
+        // Same order as pywizlight: a module name containing "RGB" is a
+        // colour device; "TW" alone means tunable white only.
+        const moduleName = data.moduleName.toUpperCase();
+        this.isRGB = moduleName.includes("RGB");
+        this.isTW = !this.isRGB && moduleName.includes("TW");
         this.deviceInfoLoaded = true;
 
         if (
@@ -1370,6 +1466,20 @@ class WIZDevice {
     }
 
     update() {
+        // This plugin only sends RGB colour, so plugs and white-only bulbs
+        // are listed in the service panel but not added as devices.
+        if (this.deviceInfoLoaded && !this.isRGB) {
+            if (!this.unsupportedLogged) {
+                service.log(
+                    "[WIZ] Not added: " + this.modelName +
+                    " is not an RGB device."
+                );
+                this.unsupportedLogged = true;
+            }
+
+            return;
+        }
+
         if (this.deviceInfoLoaded && !this.announced) {
             service.updateController(this);
             service.announceController(this);
@@ -1385,6 +1495,7 @@ class WIZDevice {
             Date.now() - this.lastSeen > WIZ_STALE_AFTER_MS
         ) {
             this.stale = true;
+            service.updateController(this);
             service.log(
                 "[WIZ] Device has not answered discovery recently."
             );

@@ -1,8 +1,8 @@
 Item {
     anchors.fill: parent
 
-    Rectangle{
-        anchors{
+    Rectangle {
+        anchors {
             top: parent.top
             right: parent.right
         }
@@ -10,14 +10,15 @@ Item {
         height: linkingCol.childrenRect.height + linkingCol.topPadding + linkingCol.bottomPadding
         color: theme.background3
         radius: theme.radius
-        Column{
+
+        Column {
             id: linkingCol
             spacing: 5
             padding: 10
             width: parent.width
 
-            Label{
-                font{
+            Label {
+                font {
                     pixelSize: 16
                     family: theme.primaryfont
                     weight: Font.Bold
@@ -25,8 +26,9 @@ Item {
                 color: theme.primarytextcolor
                 text: "Linking Instructions"
             }
-            Label{
-                font{
+
+            Label {
+                font {
                     pixelSize: 14
                     family: theme.primaryfont
                 }
@@ -34,58 +36,58 @@ Item {
                 color: theme.secondarytextcolor
                 textFormat: Text.MarkdownText
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                text: 
-"* The Device must be on a 2.4ghz WIFI network. \n
-* The local udp network communication must be active."
+                text: "* The device must be on a 2.4 GHz Wi-Fi network, the same network as this PC.\n" +
+                      "* Local communication must be enabled in the WiZ app (Settings > Security).\n" +
+                      "* Local UDP traffic must not be blocked by the router or firewall."
             }
-
         }
     }
 
-    Column{
+    Column {
         width: parent.width
         height: parent.height
         spacing: 10
 
-		Rectangle{
-			id: scanningItem
-			height: 50
-			width: childrenRect.width + 15
-			visible: service.controllers.length === 0
-			color: theme.background3
-			radius: theme.radius
+        Rectangle {
+            id: scanningItem
+            height: 50
+            width: childrenRect.width + 15
+            visible: service.controllers.length === 0
+            color: theme.background3
+            radius: theme.radius
 
-			BusyIndicator {
-				id: scanningIndicator
-				height: 30
-				anchors.verticalCenter: parent.verticalCenter
-				width: parent.height
-				Material.accent: "#88FFFFFF"
-				running: scanningItem.visible
-			}  
+            BusyIndicator {
+                id: scanningIndicator
+                height: 30
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.height
+                Material.accent: "#88FFFFFF"
+                running: scanningItem.visible
+            }
 
-			Column{
-				width: childrenRect.width
-				anchors.left: scanningIndicator.right
-				anchors.verticalCenter: parent.verticalCenter
+            Column {
+                width: childrenRect.width
+                anchors.left: scanningIndicator.right
+                anchors.verticalCenter: parent.verticalCenter
 
-				Text{
-					color: theme.secondarytextcolor
-					text: "Searching network for WIZ Devices..." 
-					font.pixelSize: 14
-					font.family: "Montserrat"
-				}
-				Text{
-					color: theme.secondarytextcolor
-					text: "This may take several minutes..." 
-					font.pixelSize: 14
-					font.family: "Montserrat"
-				}
-			}
-		}
-    
-        Repeater{
-            model: service.controllers          
+                Text {
+                    color: theme.secondarytextcolor
+                    text: "Searching the network for WiZ devices..."
+                    font.pixelSize: 14
+                    font.family: theme.primaryfont
+                }
+
+                Text {
+                    color: theme.secondarytextcolor
+                    text: "The first scans run every 5 seconds."
+                    font.pixelSize: 14
+                    font.family: theme.primaryfont
+                }
+            }
+        }
+
+        Repeater {
+            model: service.controllers
 
             delegate: Item {
                 id: root
@@ -100,71 +102,82 @@ Item {
                     radius: 5
                 }
 
-                Column{
+                Column {
                     id: content
                     width: parent.width
                     padding: 15
                     spacing: 5
 
-                    Row{
+                    Row {
                         width: parent.width
                         height: childrenRect.height
 
-                        Column{
+                        Column {
                             id: leftCol
                             width: 260
                             height: childrenRect.height
                             spacing: 5
 
-                            Text{
+                            Text {
                                 color: theme.primarytextcolor
                                 text: device.modelName
                                 font.pixelSize: 16
-                                font.family: "Poppins"
+                                font.family: theme.primaryfont
                                 font.weight: Font.Bold
                             }
 
-                            Row{
+                            Row {
                                 spacing: 5
-                                Text{
+
+                                Text {
                                     color: theme.secondarytextcolor
-                                    text: "Id: " + device.id
+                                    text: "ID: " + device.id
                                 }
 
-                                Text{
+                                Text {
                                     color: theme.secondarytextcolor
                                     text: "|"
                                 }
 
-                                Text{
+                                Text {
                                     color: theme.secondarytextcolor
                                     text: "Room ID: " + device.roomid
-                                }  
+                                }
                             }
 
-                            Row{
+                            Row {
                                 spacing: 5
-                                Text{
+
+                                Text {
                                     color: theme.secondarytextcolor
-                                    text: "Ip Address: " + (device.ip != "" ? device.ip : "Unknown")
+                                    text: "IP address: " + (device.ip ? device.ip : "Unknown")
                                 }
 
-                                Text{
+                                Text {
                                     color: theme.secondarytextcolor
                                     text: "|"
                                 }
 
-                                Text{
+                                Text {
                                     color: theme.secondarytextcolor
-                                    text: "Firmware Version: " + device.fwVersion
-                                }  
+                                    text: "Firmware: " + device.fwVersion
+                                }
                             }
 
+                            // Updated when WIZ.js calls service.updateController().
+                            Text {
+                                color: theme.secondarytextcolor
+                                text: "Status: " + (
+                                    !device.deviceInfoLoaded ? "Waiting for device information" :
+                                    !device.isRGB ? "Not added (not an RGB device)" :
+                                    device.stale ? "Not responding to discovery" :
+                                    "Online"
+                                )
+                            }
                         }
-
                     }
                 }
-            }  
+            }
         }
     }
 }
